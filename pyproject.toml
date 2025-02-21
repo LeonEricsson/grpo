@@ -1,0 +1,13 @@
+[project]
+name = "unsloth-grpo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "diffusers>=0.32.2",
+    "ipykernel>=6.29.5",
+    "setuptools>=75.8.0",
+    "unsloth>=2025.2.12",
+    "vllm>=0.7.2",
+]
