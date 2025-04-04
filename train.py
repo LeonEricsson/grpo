@@ -5,6 +5,7 @@ import re
 from datasets import load_dataset, Dataset
 from trl import GRPOConfig, GRPOTrainer
 import wandb
+from math_grader import answer_tag_reward_fn
 
 PatchFastRL("GRPO", FastLanguageModel)
 
@@ -48,7 +49,36 @@ def extract_hash_answer(text: str) -> str | None:
     return text.split("####")[1].strip()
 
 
-# uncomment middle messages for 1-shot prompting
+def math_verify_reward_func(prompts, completions, answer, **kwargs) -> list[float]:
+    responses = completions
+    return [answer_tag_reward_fn(r, answer[0])[1] for r in responses]
+
+def strict_format_reward_func(completions, **kwargs) -> list[float]:
+    """Reward function that checks if the completion has a specific format."""
+    pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    responses = [completion[0]["content"] for completion in completions]
+    matches = [re.match(pattern, r) for r in responses]
+    return [0.5 if match else 0.0 for match in matches]
+
+
+def soft_format_reward_func(completions, **kwargs) -> list[float]:
+    """Reward function that checks if the completion has a specific format."""
+    pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
+    responses = [completion[0]["content"] for completion in completions]
+    matches = [re.match(pattern, r) for r in responses]
+    return [0.5 if match else 0.0 for match in matches]
+
+def get_MATH_questions(split="train") -> Dataset:
+    data = load_dataset("nlile/hendrycks-MATH-benchmark")[split]  # type: ignore
+    data = data.map(
+        lambda x: {
+            "prompt": R1_TEMPLATE.format(question=x["problem"]),
+        }
+    )
+    return data
+
+## GSM8K Data and Rewards
+
 def get_gsm8k_questions(split="train") -> Dataset:
     data = load_dataset("openai/gsm8k", "main")[split]  # type: ignore
     data = data.map(
@@ -61,17 +91,6 @@ def get_gsm8k_questions(split="train") -> Dataset:
         }
     )  # type: ignore
     return data  # type: ignore
-
-
-def get_MATH_questions(split="train") -> Dataset:
-    data = load_dataset("nlile/hendrycks-MATH-benchmark")[split]  # type: ignore
-    data = data.map(
-        lambda x: {
-            "prompt": R1_TEMPLATE.format(question=x["problem"]),
-        }
-    )
-    return data
-
 
 # Reward functions
 def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[float]:
@@ -164,7 +183,7 @@ def main():
 
     training_args = GRPOConfig(
         use_vllm=True,  # use vLLM for fast inference!
-        learning_rate=2e-5,
+        learning_rate=3e-4,
         adam_beta1=0.9,
         adam_beta2=0.99,
         weight_decay=0.1,
@@ -178,14 +197,14 @@ def main():
         gradient_accumulation_steps=1,  # Increase to 4 for smoother training
         num_generations=8,  # Decrease if out of memory
         max_prompt_length=256,
-        max_completion_length=200,
+        max_completion_length=1000,
         # num_train_epochs = 1, # Set to 1 for a full training run
         max_steps=200,
         save_steps=250,
         max_grad_norm=0.2,
         report_to="wandb",  # Can use Weights & Biases
         output_dir="outputs",
-        beta=0.04,
+        beta=0,
     )
 
     wandb.init(
